@@ -1,0 +1,43 @@
+<div class="away-messages-settings">
+    <h3>Away Messages Configuration</h3>
+    <p><small>Learn how to setup Away Messages properly here. You'll need the complementary plugin to run this.</small></p>
+    
+    <label><input type="checkbox" id="am-enable"> Enable Away Messages</label><br>
+    <label><input type="checkbox" id="am-notifications"> Notifications</label>
+    
+    <div style="margin-left: 20px;">
+        <label>Notifying Discord webhook:</label>
+        <input type="text" id="am-webhook" style="width:100%;" placeholder="https://discord.com/api/webhooks/your_webhook_here">
+        <p><small>Notifications from Away Messages will be sent to your webhook URL. Enabling push notifications is also recommended.</small></p>
+    </div>
+    
+    <hr>
+    
+    <label><input type="checkbox" id="am-work-enable"> Enable work hours</label>
+    <div style="margin-left: 20px;">
+        <label>Work label: <input type="text" id="am-work-label" value="School"></label><br>
+        <label>Work hours: from 
+            <select id="am-work-start-h"></select>:<select id="am-work-start-m"></select>
+            <select id="am-work-start-ap"><option>AM</option><option>PM</option></select>
+            to 
+            <select id="am-work-end-h"></select>:<select id="am-work-end-m"></select>
+            <select id="am-work-end-ap"><option>AM</option><option>PM</option></select>
+        </label>
+        <br>
+        <div id="am-work-days">
+            <label><input type="checkbox" data-day="Monday"> Monday</label>
+            <label><input type="checkbox" data-day="Tuesday"> Tuesday</label>
+            <label><input type="checkbox" data-day="Wednesday"> Wednesday</label>
+            <label><input type="checkbox" data-day="Thursday"> Thursday</label>
+            <label><input type="checkbox" data-day="Friday"> Friday</label>
+            <label><input type="checkbox" data-day="Saturday"> Saturday</label>
+            <label><input type="checkbox" data-day="Sunday"> Sunday</label>
+        </div>
+    </div>
+    
+    <hr>
+    
+    <h4>Character Specific Schedules</h4>
+    <div id="am-character-container">
+        </div>
+</div>
