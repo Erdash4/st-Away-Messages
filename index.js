@@ -18,12 +18,13 @@ jQuery(() => {
             Monday: false, Tuesday: false, Wednesday: false,
             Thursday: false, Friday: false, Saturday: false, Sunday: false
         },
-        characters: {}
+        characters: {},
+        userName: 'User' // Add default userName
     };
 
     let settings = {};
     let characterList = [];
-    let uiRendered = false;           // Flag to prevent full re-renders
+    let uiRendered = false;
 
     function loadSettings() {
         const saved = localStorage.getItem(settingsKey);
@@ -37,6 +38,7 @@ jQuery(() => {
             settings = JSON.parse(JSON.stringify(defaultSettings));
         }
         if (!settings.characters) settings.characters = {};
+        if (!settings.userName) settings.userName = defaultSettings.userName;
     }
 
     function saveSettings() {
@@ -88,13 +90,34 @@ jQuery(() => {
         }
     }
 
-    // Fetch characters from the server
+    // PATCHED: Extract character name from TavernCard v2 format
+    function extractCharacterName(charData) {
+        return charData.data?.name || charData.name || charData.avatar?.replace('.png', '') || 'Unknown';
+    }
+
+    // PATCHED: Fetch characters using the proper SillyTavern API endpoint
     async function refreshCharacterList() {
         try {
-            const response = await fetch('/api/plugins/AwayMessages/characters');
+            // Use POST method as required by /api/characters/all
+            const response = await fetch('/api/characters/all', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}) // Empty body - endpoint doesn't require parameters
+            });
+            
             if (response.ok) {
-                const newList = await response.json();
-                characterList = newList;
+                const rawData = await response.json();
+                
+                // Filter and map to consistent format
+                characterList = rawData
+                    .filter(char => char?.name || char?.data?.name) // Remove invalid entries
+                    .map(char => ({
+                        name: extractCharacterName(char),
+                        avatar: char.avatar, // filename.png - used as unique identifier
+                        tags: char.data?.tags || char.tags || [],
+                        fav: char.data?.extensions?.fav || char.fav || false
+                    }));
+                
                 // Ensure settings exist for all characters
                 for (const char of characterList) {
                     buildCharacterSettings(char.name);
@@ -113,9 +136,14 @@ jQuery(() => {
                         }
                     }
                 }
+                return true;
+            } else {
+                console.warn(`AwayMessages: API returned ${response.status}`);
+                return false;
             }
         } catch (e) {
-            console.warn('AwayMessages: Could not fetch character list, using existing settings.');
+            console.warn('AwayMessages: Could not fetch character list:', e.message);
+            return false;
         }
     }
 
@@ -125,19 +153,18 @@ jQuery(() => {
         if (!cs) return;
 
         const drawerHtml = `
-            <div class="inline-drawer">
+            <div class="inline-drawer" data-character="${escapeHtml(characterName)}">
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <b>${escapeHtml(characterName)}</b>
                     <span class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></span>
                 </div>
                 <div class="inline-drawer-content" style="display: none;">
-                    <!-- same content as in renderSettingsUI but only for this character -->
                     <label class="checkbox_label">
                         <input type="checkbox" class="AwayMessages_charEnabled" data-char="${escapeHtml(characterName)}" ${cs.enabled ? 'checked' : ''}>
                         <span>Enable Away Messages for ${escapeHtml(characterName)}</span>
                     </label>
                     <div>
-                        <b>Timed based messaging weights</b><br>
+                        <b>Time-based messaging weights</b><br>
                         Time range: 
                         <input type="number" class="AwayMessages_charRangeMin" data-char="${escapeHtml(characterName)}" value="${cs.timeRangeMin}" min="1" style="width:50px">
                         <select class="AwayMessages_charRangeMinUnit" data-char="${escapeHtml(characterName)}">
@@ -148,13 +175,13 @@ jQuery(() => {
                         <select class="AwayMessages_charRangeMaxUnit" data-char="${escapeHtml(characterName)}">
                             ${makeUnitOptions(cs.timeRangeMaxUnit)}
                         </select>
-                        <table>
+                        <table class="AwayMessages_weightsTable">
                         ${makeWeightRows(characterName, cs.weights)}
                         </table>
                         <label>Away messaging prompt:<br><textarea class="AwayMessages_charPrompt" data-char="${escapeHtml(characterName)}" rows="3">${escapeHtml(cs.prompt)}</textarea></label><br>
                         <label>Away messaging prompt (at work):<br><textarea class="AwayMessages_charPromptAtWork" data-char="${escapeHtml(characterName)}" rows="3">${escapeHtml(cs.promptAtWork)}</textarea></label><br>
-                        <label>At work multiplier: <input type="range" class="AwayMessages_charWorkMultiplier" data-char="${escapeHtml(characterName)}" min="0.0" max="1.0" step="0.01" value="${cs.workMultiplier}"> <span>${cs.workMultiplier}</span></label><br>
-                        <label>Online multiplier: <input type="range" class="AwayMessages_charOnlineMultiplier" data-char="${escapeHtml(characterName)}" min="0.0" max="4.0" step="0.01" value="${cs.onlineMultiplier}"> <span>${cs.onlineMultiplier}</span></label>
+                        <label>At work multiplier: <input type="range" class="AwayMessages_charWorkMultiplier" data-char="${escapeHtml(characterName)}" min="0.0" max="1.0" step="0.01" value="${cs.workMultiplier}"> <span class="AwayMessages_workMultiplierValue">${cs.workMultiplier}</span></label><br>
+                        <label>Online multiplier: <input type="range" class="AwayMessages_charOnlineMultiplier" data-char="${escapeHtml(characterName)}" min="0.0" max="4.0" step="0.01" value="${cs.onlineMultiplier}"> <span class="AwayMessages_onlineMultiplierValue">${cs.onlineMultiplier}</span></label>
                         <p><small>Online multiplier will activate if you have a tab of SillyTavern open.</small></p>
                         
                         <label class="checkbox_label">
@@ -209,13 +236,11 @@ jQuery(() => {
         bindCharacterEvents(characterName);
     }
 
-    // Helper to generate unit option HTML
     function makeUnitOptions(selected) {
         const units = ['seconds', 'minutes', 'hours', 'days'];
         return units.map(u => `<option value="${u}" ${selected === u ? 'selected' : ''}>${u}</option>`).join('');
     }
 
-    // Helper to generate weight rows HTML
     function makeWeightRows(charName, weights) {
         const periods = [
             { id: 'early_morning', label: 'Early morning' },
@@ -231,28 +256,37 @@ jQuery(() => {
             <tr>
                 <td>${p.label}</td>
                 <td><input type="range" class="AwayMessages_charWeight" data-char="${escapeHtml(charName)}" data-period="${p.id}" min="0.0" max="1.0" step="0.01" value="${weights[p.id]}"></td>
-                <td>${weights[p.id]}</td>
+                <td class="AwayMessages_weightValue">${weights[p.id]}</td>
             </tr>
         `).join('');
     }
 
     function escapeHtml(str) {
-        return String(str).replace(/[&<>]/g, function(m) {
-            if (m === '&') return '&amp;';
-            if (m === '<') return '&lt;';
-            if (m === '>') return '&gt;';
-            return m;
-        }).replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, function(c) {
-            return c;
+        if (typeof str !== 'string') return '';
+        return str.replace(/[&<>"']/g, function(m) {
+            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+            return map[m] || m;
         });
     }
 
     function bindCharacterEvents(characterName) {
-        // This binds all input/change events for the newly added character
-        const container = $(`#AwayMessages_characterSettings .inline-drawer:has(b:contains('${characterName}'))`);
+        const container = $(`#AwayMessages_characterSettings .inline-drawer[data-character="${CSS.escape(characterName)}"]`);
+        
+        // Update display values for range inputs
+        container.find('input[type="range"]').on('input', function() {
+            const $span = $(this).next('span');
+            if ($span.length) $span.text(parseFloat($(this).val()).toFixed(2));
+        });
+        
+        // Update weight display values
+        container.find('.AwayMessages_charWeight').on('input', function() {
+            $(this).closest('tr').find('.AwayMessages_weightValue').text(parseFloat($(this).val()).toFixed(2));
+        });
+
         container.find('input, select, textarea').on('change input', function(e) {
             updateCharacterSettingFromElement(this);
         });
+        
         container.find('.inline-drawer-toggle').off('click').on('click', function() {
             $(this).next('.inline-drawer-content').slideToggle(200);
             $(this).find('.inline-drawer-icon').toggleClass('down');
@@ -260,7 +294,7 @@ jQuery(() => {
     }
 
     function renderSettingsUI() {
-        if (uiRendered) return; // prevent full re-render
+        if (uiRendered) return;
 
         const html = `
         <div class="AwayMessages-settings">
@@ -270,8 +304,8 @@ jQuery(() => {
                     <span class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></span>
                 </div>
                 <div class="inline-drawer-content">
-                    <p><i>Learn how to setup Away Messages properly <a href="#">here</a>. You'll need the complementary plugin to run this.</i></p>
-                    <p>Hours: early morning 3am–6am, morning 6am–9am, late morning 9am–12pm, afternoon 12pm–3pm, late afternoon 3pm–6pm, evening 6pm–9pm, night 9pm–12am, wee hours 12am–3am.</p>
+                    <p><i>Learn how to setup Away Messages properly <a href="https://github.com/SillyTavern/SillyTavern" target="_blank">here</a>. You'll need the complementary plugin to run this.</i></p>
+                    <p><small>Hours: early morning 3am–6am, morning 6am–9am, late morning 9am–12pm, afternoon 12pm–3pm, late afternoon 3pm–6pm, evening 6pm–9pm, night 9pm–12am, wee hours 12am–3am.</small></p>
                     
                     <label class="checkbox_label">
                         <input type="checkbox" id="AwayMessages_enabled" ${settings.enabled ? 'checked' : ''}>
@@ -282,7 +316,7 @@ jQuery(() => {
                         <span>Notifications</span>
                     </label>
                     <label>Notifying Discord webhook:
-                        <input type="text" id="AwayMessages_webhookUrl" value="${escapeHtml(settings.webhookUrl)}">
+                        <input type="text" id="AwayMessages_webhookUrl" value="${escapeHtml(settings.webhookUrl)}" placeholder="https://discord.com/api/webhooks/...">
                     </label>
                     <p><small>Notifications from Away Messages will be sent to your webhook URL. Enabling push notifications is also recommended.</small></p>
                     
@@ -291,7 +325,7 @@ jQuery(() => {
                         <span>Enable work hours</span>
                     </label>
                     <div id="AwayMessages_workHoursFields" style="${settings.workHoursEnabled ? '' : 'display:none'}">
-                        <label>Work label: <input type="text" id="AwayMessages_workLabel" value="${escapeHtml(settings.workLabel)}"></label>
+                        <label>Work label: <input type="text" id="AwayMessages_workLabel" value="${escapeHtml(settings.workLabel)}" placeholder="e.g., School, Work"></label>
                         <div>Work hours: from 
                             <input type="number" id="AwayMessages_workFromHour" min="1" max="12" value="${settings.workFromHour}" style="width:50px">:
                             <input type="number" id="AwayMessages_workFromMinute" min="0" max="59" value="${settings.workFromMinute}" style="width:50px">
@@ -307,9 +341,10 @@ jQuery(() => {
                                 <option value="PM" ${settings.workToAmPm === 'PM' ? 'selected' : ''}>PM</option>
                             </select>
                         </div>
-                        <div>${['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map(d => 
-                            `<label class="checkbox_label"><input type="checkbox" class="AwayMessages_workDay" data-day="${d}" ${settings.workDays[d] ? 'checked' : ''}> ${d}</label>`
-                        ).join(' ')}</div>
+                        <div class="AwayMessages_workDays">
+                            ${['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map(d => 
+                                `<label class="checkbox_label"><input type="checkbox" class="AwayMessages_workDay" data-day="${d}" ${settings.workDays[d] ? 'checked' : ''}> ${d}</label>`
+                            ).join(' ')}</div>
                     </div>
 
                     <h3>Character Settings</h3>
@@ -352,15 +387,16 @@ jQuery(() => {
             saveSettings();
             sendSettingsToServer();
         });
-        ['workLabel','workFromHour','workFromMinute','workFromAmPm','workToHour','workToMinute','workToAmPm'].forEach(id => {
+        $('#AwayMessages_workLabel').on('input', function() {
+            settings.workLabel = this.value;
+            saveSettings();
+            sendSettingsToServer();
+        });
+        ['workFromHour','workFromMinute','workFromAmPm','workToHour','workToMinute','workToAmPm'].forEach(id => {
             $(`#AwayMessages_${id}`).on('change input', function() {
                 const val = $(this).val();
                 const key = id.replace('AwayMessages_', '');
-                if (typeof settings[key] === 'number') {
-                    settings[key] = Number(val);
-                } else {
-                    settings[key] = val;
-                }
+                settings[key] = key.includes('Hour') || key.includes('Minute') ? Number(val) : val;
                 saveSettings();
                 sendSettingsToServer();
             });
@@ -378,17 +414,30 @@ jQuery(() => {
         const charName = $el.data('char');
         if (!charName || !settings.characters[charName]) return;
         const cs = settings.characters[charName];
-        let val = $el.is(':checkbox') ? $el.prop('checked') : ($el.val() === '' ? '' : ($el.is(':input') ? ($el.attr('type') === 'number' ? Number($el.val()) : $el.val()) : $el.val()));
+        
+        let val = $el.is(':checkbox') ? $el.prop('checked') : $el.val();
+        if ($el.attr('type') === 'number' && val !== '') val = Number(val);
+        if ($el.is('input[type="range"]')) val = parseFloat(val);
+
         if ($el.hasClass('AwayMessages_charEnabled')) cs.enabled = val;
         else if ($el.hasClass('AwayMessages_charRangeMin')) cs.timeRangeMin = Number(val);
         else if ($el.hasClass('AwayMessages_charRangeMinUnit')) cs.timeRangeMinUnit = val;
         else if ($el.hasClass('AwayMessages_charRangeMax')) cs.timeRangeMax = Number(val);
         else if ($el.hasClass('AwayMessages_charRangeMaxUnit')) cs.timeRangeMaxUnit = val;
-        else if ($el.hasClass('AwayMessages_charWeight')) cs.weights[$el.data('period')] = parseFloat(val);
+        else if ($el.hasClass('AwayMessages_charWeight')) {
+            cs.weights[$el.data('period')] = parseFloat(val);
+            $el.closest('tr').find('.AwayMessages_weightValue').text(parseFloat(val).toFixed(2));
+        }
         else if ($el.hasClass('AwayMessages_charPrompt')) cs.prompt = val;
         else if ($el.hasClass('AwayMessages_charPromptAtWork')) cs.promptAtWork = val;
-        else if ($el.hasClass('AwayMessages_charWorkMultiplier')) cs.workMultiplier = parseFloat(val);
-        else if ($el.hasClass('AwayMessages_charOnlineMultiplier')) cs.onlineMultiplier = parseFloat(val);
+        else if ($el.hasClass('AwayMessages_charWorkMultiplier')) {
+            cs.workMultiplier = parseFloat(val);
+            $el.next('span').text(parseFloat(val).toFixed(2));
+        }
+        else if ($el.hasClass('AwayMessages_charOnlineMultiplier')) {
+            cs.onlineMultiplier = parseFloat(val);
+            $el.next('span').text(parseFloat(val).toFixed(2));
+        }
         else if ($el.hasClass('AwayMessages_charAfterWorkEnabled')) {
             cs.afterWorkEnabled = val;
             $el.closest('.inline-drawer-content').find('.AwayMessages_afterWorkFields').toggle(val);
@@ -410,6 +459,7 @@ jQuery(() => {
         else if ($el.hasClass('AwayMessages_charGreetingOffsetNegUnit')) cs.greetingOffsetNegUnit = val;
         else if ($el.hasClass('AwayMessages_charGreetingOffsetPos')) cs.greetingOffsetPos = Number(val);
         else if ($el.hasClass('AwayMessages_charGreetingOffsetPosUnit')) cs.greetingOffsetPosUnit = val;
+        
         saveSettings();
         sendSettingsToServer();
     }
@@ -417,7 +467,7 @@ jQuery(() => {
     function sendSettingsToServer() {
         if (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) {
             const context = SillyTavern.getContext();
-            if (context && context.socket) {
+            if (context?.socket) {
                 context.socket.emit('AwayMessages_settings', settings);
             }
         }
@@ -428,7 +478,7 @@ jQuery(() => {
         lastActivity = Date.now();
         if (typeof SillyTavern !== 'undefined') {
             const context = SillyTavern.getContext();
-            if (context && context.socket) {
+            if (context?.socket) {
                 context.socket.emit('AwayMessages_heartbeat', { lastActivity });
             }
         }
@@ -438,11 +488,43 @@ jQuery(() => {
         document.addEventListener(evt, updateActivity, { passive: true });
     });
 
+    // PATCHED: Refresh button for manual character list reload
+    function addRefreshButton() {
+        const $refreshBtn = $('<button class="menu_button" style="margin-left:10px" title="Refresh character list">🔄 Refresh</button>');
+        $refreshBtn.on('click', async function() {
+            $refreshBtn.prop('disabled', true).text('Loading...');
+            const success = await refreshCharacterList();
+            $refreshBtn.prop('disabled', false).text('🔄 Refresh');
+            if (success) {
+                // Re-render only the character settings section
+                $('#AwayMessages_characterSettings').empty();
+                for (const char of characterList) {
+                    addCharacterDrawer(char.name);
+                }
+                console.log('AwayMessages: Character list refreshed');
+            }
+        });
+        // Insert after the "Character Settings" header
+        $('#extensions_settings h3:contains("Character Settings")').after($refreshBtn);
+    }
+
     // Initialization
-    loadSettings();
-    refreshCharacterList().then(() => {
+    async function init() {
+        loadSettings();
+        
+        // Try to fetch characters, with fallback to settings-only mode
+        const charsLoaded = await refreshCharacterList();
+        if (!charsLoaded && Object.keys(settings.characters).length === 0) {
+            console.warn('AwayMessages: No characters available. Please ensure SillyTavern is running and characters exist.');
+        }
+        
         renderSettingsUI();
+        addRefreshButton(); // Add manual refresh button
         sendSettingsToServer();
         setInterval(updateActivity, 10000);
-    });
+        
+        console.log(`${extensionName}: Initialized with ${characterList.length} characters`);
+    }
+    
+    init();
 });
