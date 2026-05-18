@@ -18,11 +18,12 @@ jQuery(() => {
             Monday: false, Tuesday: false, Wednesday: false,
             Thursday: false, Friday: false, Saturday: false, Sunday: false
         },
-        characters: {} // will be populated dynamically
+        characters: {}
     };
 
     let settings = {};
-    let characterList = []; // updated from server
+    let characterList = [];
+    let uiRendered = false;           // Flag to prevent full re-renders
 
     function loadSettings() {
         const saved = localStorage.getItem(settingsKey);
@@ -35,7 +36,6 @@ jQuery(() => {
         } else {
             settings = JSON.parse(JSON.stringify(defaultSettings));
         }
-        // Ensure characters object exists
         if (!settings.characters) settings.characters = {};
     }
 
@@ -88,15 +88,30 @@ jQuery(() => {
         }
     }
 
-    // Fetch characters from the server (via the plugin's API endpoint)
+    // Fetch characters from the server
     async function refreshCharacterList() {
         try {
             const response = await fetch('/api/plugins/AwayMessages/characters');
             if (response.ok) {
-                characterList = await response.json();
-                // Ensure all existing characters have settings entries
+                const newList = await response.json();
+                characterList = newList;
+                // Ensure settings exist for all characters
                 for (const char of characterList) {
                     buildCharacterSettings(char.name);
+                }
+
+                // If UI already exists, only add missing character drawers
+                if (uiRendered) {
+                    const existingChars = new Set();
+                    $('#AwayMessages_characterSettings .inline-drawer').each(function() {
+                        const name = $(this).find('.inline-drawer-header b').text();
+                        existingChars.add(name);
+                    });
+                    for (const char of characterList) {
+                        if (!existingChars.has(char.name)) {
+                            addCharacterDrawer(char.name);
+                        }
+                    }
                 }
             }
         } catch (e) {
@@ -104,7 +119,149 @@ jQuery(() => {
         }
     }
 
+    // Append a drawer for a single character to the existing DOM
+    function addCharacterDrawer(characterName) {
+        const cs = settings.characters[characterName];
+        if (!cs) return;
+
+        const drawerHtml = `
+            <div class="inline-drawer">
+                <div class="inline-drawer-toggle inline-drawer-header">
+                    <b>${escapeHtml(characterName)}</b>
+                    <span class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></span>
+                </div>
+                <div class="inline-drawer-content" style="display: none;">
+                    <!-- same content as in renderSettingsUI but only for this character -->
+                    <label class="checkbox_label">
+                        <input type="checkbox" class="AwayMessages_charEnabled" data-char="${escapeHtml(characterName)}" ${cs.enabled ? 'checked' : ''}>
+                        <span>Enable Away Messages for ${escapeHtml(characterName)}</span>
+                    </label>
+                    <div>
+                        <b>Timed based messaging weights</b><br>
+                        Time range: 
+                        <input type="number" class="AwayMessages_charRangeMin" data-char="${escapeHtml(characterName)}" value="${cs.timeRangeMin}" min="1" style="width:50px">
+                        <select class="AwayMessages_charRangeMinUnit" data-char="${escapeHtml(characterName)}">
+                            ${makeUnitOptions(cs.timeRangeMinUnit)}
+                        </select>
+                        to 
+                        <input type="number" class="AwayMessages_charRangeMax" data-char="${escapeHtml(characterName)}" value="${cs.timeRangeMax}" min="1" style="width:50px">
+                        <select class="AwayMessages_charRangeMaxUnit" data-char="${escapeHtml(characterName)}">
+                            ${makeUnitOptions(cs.timeRangeMaxUnit)}
+                        </select>
+                        <table>
+                        ${makeWeightRows(characterName, cs.weights)}
+                        </table>
+                        <label>Away messaging prompt:<br><textarea class="AwayMessages_charPrompt" data-char="${escapeHtml(characterName)}" rows="3">${escapeHtml(cs.prompt)}</textarea></label><br>
+                        <label>Away messaging prompt (at work):<br><textarea class="AwayMessages_charPromptAtWork" data-char="${escapeHtml(characterName)}" rows="3">${escapeHtml(cs.promptAtWork)}</textarea></label><br>
+                        <label>At work multiplier: <input type="range" class="AwayMessages_charWorkMultiplier" data-char="${escapeHtml(characterName)}" min="0.0" max="1.0" step="0.01" value="${cs.workMultiplier}"> <span>${cs.workMultiplier}</span></label><br>
+                        <label>Online multiplier: <input type="range" class="AwayMessages_charOnlineMultiplier" data-char="${escapeHtml(characterName)}" min="0.0" max="4.0" step="0.01" value="${cs.onlineMultiplier}"> <span>${cs.onlineMultiplier}</span></label>
+                        <p><small>Online multiplier will activate if you have a tab of SillyTavern open.</small></p>
+                        
+                        <label class="checkbox_label">
+                            <input type="checkbox" class="AwayMessages_charAfterWorkEnabled" data-char="${escapeHtml(characterName)}" ${cs.afterWorkEnabled ? 'checked' : ''}>
+                            <span>Enable after work message</span>
+                        </label>
+                        <div class="AwayMessages_afterWorkFields" style="${cs.afterWorkEnabled ? '' : 'display:none'}">
+                            <label>After work message:<br><textarea class="AwayMessages_charAfterWorkMessage" data-char="${escapeHtml(characterName)}" rows="3">${escapeHtml(cs.afterWorkMessage)}</textarea></label><br>
+                            <div>Random offset: 
+                                -<input type="number" class="AwayMessages_charAfterWorkOffsetNeg" data-char="${escapeHtml(characterName)}" value="${cs.afterWorkOffsetNeg}" min="0" style="width:50px">
+                                <select class="AwayMessages_charAfterWorkOffsetNegUnit" data-char="${escapeHtml(characterName)}">
+                                    ${makeUnitOptions(cs.afterWorkOffsetNegUnit)}
+                                </select>
+                                to +
+                                <input type="number" class="AwayMessages_charAfterWorkOffsetPos" data-char="${escapeHtml(characterName)}" value="${cs.afterWorkOffsetPos}" min="0" style="width:50px">
+                                <select class="AwayMessages_charAfterWorkOffsetPosUnit" data-char="${escapeHtml(characterName)}">
+                                    ${makeUnitOptions(cs.afterWorkOffsetPosUnit)}
+                                </select>
+                            </div>
+                        </div>
+
+                        <label class="checkbox_label">
+                            <input type="checkbox" class="AwayMessages_charGreetingsEnabled" data-char="${escapeHtml(characterName)}" ${cs.greetingsEnabled ? 'checked' : ''}>
+                            <span>Enable greetings</span>
+                        </label>
+                        <div class="AwayMessages_greetingsFields" style="${cs.greetingsEnabled ? '' : 'display:none'}">
+                            <label>Greeting time: 
+                                <input type="number" class="AwayMessages_charGreetingHour" data-char="${escapeHtml(characterName)}" min="1" max="12" value="${cs.greetingHour}" style="width:50px">:
+                                <input type="number" class="AwayMessages_charGreetingMinute" data-char="${escapeHtml(characterName)}" min="0" max="59" value="${cs.greetingMinute}" style="width:50px">
+                                <select class="AwayMessages_charGreetingAmPm" data-char="${escapeHtml(characterName)}">
+                                    <option value="AM" ${cs.greetingAmPm === 'AM' ? 'selected' : ''}>AM</option>
+                                    <option value="PM" ${cs.greetingAmPm === 'PM' ? 'selected' : ''}>PM</option>
+                                </select>
+                            </label><br>
+                            <label>Greeting prompt (sent as user, supports macros):<br><textarea class="AwayMessages_charGreetingPrompt" data-char="${escapeHtml(characterName)}" rows="3">${escapeHtml(cs.greetingPrompt)}</textarea></label><br>
+                            <div>Random offset: 
+                                -<input type="number" class="AwayMessages_charGreetingOffsetNeg" data-char="${escapeHtml(characterName)}" value="${cs.greetingOffsetNeg}" min="0" style="width:50px">
+                                <select class="AwayMessages_charGreetingOffsetNegUnit" data-char="${escapeHtml(characterName)}">
+                                    ${makeUnitOptions(cs.greetingOffsetNegUnit)}
+                                </select>
+                                to +
+                                <input type="number" class="AwayMessages_charGreetingOffsetPos" data-char="${escapeHtml(characterName)}" value="${cs.greetingOffsetPos}" min="0" style="width:50px">
+                                <select class="AwayMessages_charGreetingOffsetPosUnit" data-char="${escapeHtml(characterName)}">
+                                    ${makeUnitOptions(cs.greetingOffsetPosUnit)}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        $('#AwayMessages_characterSettings').append(drawerHtml);
+        bindCharacterEvents(characterName);
+    }
+
+    // Helper to generate unit option HTML
+    function makeUnitOptions(selected) {
+        const units = ['seconds', 'minutes', 'hours', 'days'];
+        return units.map(u => `<option value="${u}" ${selected === u ? 'selected' : ''}>${u}</option>`).join('');
+    }
+
+    // Helper to generate weight rows HTML
+    function makeWeightRows(charName, weights) {
+        const periods = [
+            { id: 'early_morning', label: 'Early morning' },
+            { id: 'morning', label: 'Morning' },
+            { id: 'late_morning', label: 'Late morning' },
+            { id: 'afternoon', label: 'Afternoon' },
+            { id: 'late_afternoon', label: 'Late afternoon' },
+            { id: 'evening', label: 'Evening' },
+            { id: 'night', label: 'Night' },
+            { id: 'wee_hours', label: 'Wee hours' }
+        ];
+        return periods.map(p => `
+            <tr>
+                <td>${p.label}</td>
+                <td><input type="range" class="AwayMessages_charWeight" data-char="${escapeHtml(charName)}" data-period="${p.id}" min="0.0" max="1.0" step="0.01" value="${weights[p.id]}"></td>
+                <td>${weights[p.id]}</td>
+            </tr>
+        `).join('');
+    }
+
+    function escapeHtml(str) {
+        return String(str).replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        }).replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, function(c) {
+            return c;
+        });
+    }
+
+    function bindCharacterEvents(characterName) {
+        // This binds all input/change events for the newly added character
+        const container = $(`#AwayMessages_characterSettings .inline-drawer:has(b:contains('${characterName}'))`);
+        container.find('input, select, textarea').on('change input', function(e) {
+            updateCharacterSettingFromElement(this);
+        });
+        container.find('.inline-drawer-toggle').off('click').on('click', function() {
+            $(this).next('.inline-drawer-content').slideToggle(200);
+            $(this).find('.inline-drawer-icon').toggleClass('down');
+        });
+    }
+
     function renderSettingsUI() {
+        if (uiRendered) return; // prevent full re-render
+
         const html = `
         <div class="AwayMessages-settings">
             <div class="inline-drawer">
@@ -125,7 +282,7 @@ jQuery(() => {
                         <span>Notifications</span>
                     </label>
                     <label>Notifying Discord webhook:
-                        <input type="text" id="AwayMessages_webhookUrl" value="${settings.webhookUrl}">
+                        <input type="text" id="AwayMessages_webhookUrl" value="${escapeHtml(settings.webhookUrl)}">
                     </label>
                     <p><small>Notifications from Away Messages will be sent to your webhook URL. Enabling push notifications is also recommended.</small></p>
                     
@@ -134,7 +291,7 @@ jQuery(() => {
                         <span>Enable work hours</span>
                     </label>
                     <div id="AwayMessages_workHoursFields" style="${settings.workHoursEnabled ? '' : 'display:none'}">
-                        <label>Work label: <input type="text" id="AwayMessages_workLabel" value="${settings.workLabel}"></label>
+                        <label>Work label: <input type="text" id="AwayMessages_workLabel" value="${escapeHtml(settings.workLabel)}"></label>
                         <div>Work hours: from 
                             <input type="number" id="AwayMessages_workFromHour" min="1" max="12" value="${settings.workFromHour}" style="width:50px">:
                             <input type="number" id="AwayMessages_workFromMinute" min="0" max="59" value="${settings.workFromMinute}" style="width:50px">
@@ -156,124 +313,24 @@ jQuery(() => {
                     </div>
 
                     <h3>Character Settings</h3>
-                    <div id="AwayMessages_characterSettings">
-                        ${characterList.map(char => {
-                            buildCharacterSettings(char.name);
-                            const cs = settings.characters[char.name];
-                            return `
-                            <div class="inline-drawer">
-                                <div class="inline-drawer-toggle inline-drawer-header">
-                                    <b>${char.name}</b>
-                                    <span class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></span>
-                                </div>
-                                <div class="inline-drawer-content">
-                                    <label class="checkbox_label">
-                                        <input type="checkbox" class="AwayMessages_charEnabled" data-char="${char.name}" ${cs.enabled ? 'checked' : ''}>
-                                        <span>Enable Away Messages for ${char.name}</span>
-                                    </label>
-                                    <div>
-                                        <b>Timed based messaging weights</b><br>
-                                        Time range: 
-                                        <input type="number" class="AwayMessages_charRangeMin" data-char="${char.name}" value="${cs.timeRangeMin}" min="1" style="width:50px">
-                                        <select class="AwayMessages_charRangeMinUnit" data-char="${char.name}">
-                                            <option value="seconds" ${cs.timeRangeMinUnit === 'seconds' ? 'selected' : ''}>seconds</option>
-                                            <option value="minutes" ${cs.timeRangeMinUnit === 'minutes' ? 'selected' : ''}>minutes</option>
-                                            <option value="hours" ${cs.timeRangeMinUnit === 'hours' ? 'selected' : ''}>hours</option>
-                                            <option value="days" ${cs.timeRangeMinUnit === 'days' ? 'selected' : ''}>days</option>
-                                        </select>
-                                        to 
-                                        <input type="number" class="AwayMessages_charRangeMax" data-char="${char.name}" value="${cs.timeRangeMax}" min="1" style="width:50px">
-                                        <select class="AwayMessages_charRangeMaxUnit" data-char="${char.name}">
-                                            <option value="seconds" ${cs.timeRangeMaxUnit === 'seconds' ? 'selected' : ''}>seconds</option>
-                                            <option value="minutes" ${cs.timeRangeMaxUnit === 'minutes' ? 'selected' : ''}>minutes</option>
-                                            <option value="hours" ${cs.timeRangeMaxUnit === 'hours' ? 'selected' : ''}>hours</option>
-                                            <option value="days" ${cs.timeRangeMaxUnit === 'days' ? 'selected' : ''}>days</option>
-                                        </select>
-                                        <table>
-                                            <tr><td>Early morning</td><td><input type="range" class="AwayMessages_charWeight" data-char="${char.name}" data-period="early_morning" min="0.0" max="1.0" step="0.01" value="${cs.weights.early_morning}"></td><td>${cs.weights.early_morning}</td></tr>
-                                            <tr><td>Morning</td><td><input type="range" class="AwayMessages_charWeight" data-char="${char.name}" data-period="morning" min="0.0" max="1.0" step="0.01" value="${cs.weights.morning}"></td><td>${cs.weights.morning}</td></tr>
-                                            <tr><td>Late morning</td><td><input type="range" class="AwayMessages_charWeight" data-char="${char.name}" data-period="late_morning" min="0.0" max="1.0" step="0.01" value="${cs.weights.late_morning}"></td><td>${cs.weights.late_morning}</td></tr>
-                                            <tr><td>Afternoon</td><td><input type="range" class="AwayMessages_charWeight" data-char="${char.name}" data-period="afternoon" min="0.0" max="1.0" step="0.01" value="${cs.weights.afternoon}"></td><td>${cs.weights.afternoon}</td></tr>
-                                            <tr><td>Late afternoon</td><td><input type="range" class="AwayMessages_charWeight" data-char="${char.name}" data-period="late_afternoon" min="0.0" max="1.0" step="0.01" value="${cs.weights.late_afternoon}"></td><td>${cs.weights.late_afternoon}</td></tr>
-                                            <tr><td>Evening</td><td><input type="range" class="AwayMessages_charWeight" data-char="${char.name}" data-period="evening" min="0.0" max="1.0" step="0.01" value="${cs.weights.evening}"></td><td>${cs.weights.evening}</td></tr>
-                                            <tr><td>Night</td><td><input type="range" class="AwayMessages_charWeight" data-char="${char.name}" data-period="night" min="0.0" max="1.0" step="0.01" value="${cs.weights.night}"></td><td>${cs.weights.night}</td></tr>
-                                            <tr><td>Wee hours</td><td><input type="range" class="AwayMessages_charWeight" data-char="${char.name}" data-period="wee_hours" min="0.0" max="1.0" step="0.01" value="${cs.weights.wee_hours}"></td><td>${cs.weights.wee_hours}</td></tr>
-                                        </table>
-                                        <label>Away messaging prompt:<br><textarea class="AwayMessages_charPrompt" data-char="${char.name}" rows="3">${cs.prompt}</textarea></label><br>
-                                        <label>Away messaging prompt (at work):<br><textarea class="AwayMessages_charPromptAtWork" data-char="${char.name}" rows="3">${cs.promptAtWork}</textarea></label><br>
-                                        <label>At work multiplier: <input type="range" class="AwayMessages_charWorkMultiplier" data-char="${char.name}" min="0.0" max="1.0" step="0.01" value="${cs.workMultiplier}"> <span>${cs.workMultiplier}</span></label><br>
-                                        <label>Online multiplier: <input type="range" class="AwayMessages_charOnlineMultiplier" data-char="${char.name}" min="0.0" max="4.0" step="0.01" value="${cs.onlineMultiplier}"> <span>${cs.onlineMultiplier}</span></label>
-                                        <p><small>Online multiplier will activate if you have a tab of SillyTavern open.</small></p>
-                                        
-                                        <label class="checkbox_label">
-                                            <input type="checkbox" class="AwayMessages_charAfterWorkEnabled" data-char="${char.name}" ${cs.afterWorkEnabled ? 'checked' : ''}>
-                                            <span>Enable after work message</span>
-                                        </label>
-                                        <div class="AwayMessages_afterWorkFields" style="${cs.afterWorkEnabled ? '' : 'display:none'}">
-                                            <label>After work message:<br><textarea class="AwayMessages_charAfterWorkMessage" data-char="${char.name}" rows="3">${cs.afterWorkMessage}</textarea></label><br>
-                                            <div>Random offset: 
-                                                -<input type="number" class="AwayMessages_charAfterWorkOffsetNeg" data-char="${char.name}" value="${cs.afterWorkOffsetNeg}" min="0" style="width:50px">
-                                                <select class="AwayMessages_charAfterWorkOffsetNegUnit" data-char="${char.name}">
-                                                    <option value="seconds" ${cs.afterWorkOffsetNegUnit === 'seconds' ? 'selected' : ''}>seconds</option>
-                                                    <option value="minutes" ${cs.afterWorkOffsetNegUnit === 'minutes' ? 'selected' : ''}>minutes</option>
-                                                    <option value="hours" ${cs.afterWorkOffsetNegUnit === 'hours' ? 'selected' : ''}>hours</option>
-                                                </select>
-                                                to +
-                                                <input type="number" class="AwayMessages_charAfterWorkOffsetPos" data-char="${char.name}" value="${cs.afterWorkOffsetPos}" min="0" style="width:50px">
-                                                <select class="AwayMessages_charAfterWorkOffsetPosUnit" data-char="${char.name}">
-                                                    <option value="seconds" ${cs.afterWorkOffsetPosUnit === 'seconds' ? 'selected' : ''}>seconds</option>
-                                                    <option value="minutes" ${cs.afterWorkOffsetPosUnit === 'minutes' ? 'selected' : ''}>minutes</option>
-                                                    <option value="hours" ${cs.afterWorkOffsetPosUnit === 'hours' ? 'selected' : ''}>hours</option>
-                                                </select>
-                                            </div>
-                                        </div>
-
-                                        <label class="checkbox_label">
-                                            <input type="checkbox" class="AwayMessages_charGreetingsEnabled" data-char="${char.name}" ${cs.greetingsEnabled ? 'checked' : ''}>
-                                            <span>Enable greetings</span>
-                                        </label>
-                                        <div class="AwayMessages_greetingsFields" style="${cs.greetingsEnabled ? '' : 'display:none'}">
-                                            <label>Greeting time: 
-                                                <input type="number" class="AwayMessages_charGreetingHour" data-char="${char.name}" min="1" max="12" value="${cs.greetingHour}" style="width:50px">:
-                                                <input type="number" class="AwayMessages_charGreetingMinute" data-char="${char.name}" min="0" max="59" value="${cs.greetingMinute}" style="width:50px">
-                                                <select class="AwayMessages_charGreetingAmPm" data-char="${char.name}">
-                                                    <option value="AM" ${cs.greetingAmPm === 'AM' ? 'selected' : ''}>AM</option>
-                                                    <option value="PM" ${cs.greetingAmPm === 'PM' ? 'selected' : ''}>PM</option>
-                                                </select>
-                                            </label><br>
-                                            <label>Greeting prompt (sent as user, supports macros):<br><textarea class="AwayMessages_charGreetingPrompt" data-char="${char.name}" rows="3">${cs.greetingPrompt}</textarea></label><br>
-                                            <div>Random offset: 
-                                                -<input type="number" class="AwayMessages_charGreetingOffsetNeg" data-char="${char.name}" value="${cs.greetingOffsetNeg}" min="0" style="width:50px">
-                                                <select class="AwayMessages_charGreetingOffsetNegUnit" data-char="${char.name}">
-                                                    <option value="seconds" ${cs.greetingOffsetNegUnit === 'seconds' ? 'selected' : ''}>seconds</option>
-                                                    <option value="minutes" ${cs.greetingOffsetNegUnit === 'minutes' ? 'selected' : ''}>minutes</option>
-                                                    <option value="hours" ${cs.greetingOffsetNegUnit === 'hours' ? 'selected' : ''}>hours</option>
-                                                </select>
-                                                to +
-                                                <input type="number" class="AwayMessages_charGreetingOffsetPos" data-char="${char.name}" value="${cs.greetingOffsetPos}" min="0" style="width:50px">
-                                                <select class="AwayMessages_charGreetingOffsetPosUnit" data-char="${char.name}">
-                                                    <option value="seconds" ${cs.greetingOffsetPosUnit === 'seconds' ? 'selected' : ''}>seconds</option>
-                                                    <option value="minutes" ${cs.greetingOffsetPosUnit === 'minutes' ? 'selected' : ''}>minutes</option>
-                                                    <option value="hours" ${cs.greetingOffsetPosUnit === 'hours' ? 'selected' : ''}>hours</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>`;
-                        }).join('')}
-                    </div>
+                    <div id="AwayMessages_characterSettings"></div>
                 </div>
             </div>
         </div>`;
 
         $('#extensions_settings .AwayMessages-settings').remove();
         $('#extensions_settings').append(html);
-        bindEvents();
+        bindGlobalEvents();
+
+        // Add character drawers
+        for (const char of characterList) {
+            addCharacterDrawer(char.name);
+        }
+
+        uiRendered = true;
     }
 
-    function bindEvents() {
-        // Top-level toggles
+    function bindGlobalEvents() {
         $('#AwayMessages_enabled').on('change', function() {
             settings.enabled = this.checked;
             saveSettings();
@@ -295,7 +352,6 @@ jQuery(() => {
             saveSettings();
             sendSettingsToServer();
         });
-        // Work hours fields
         ['workLabel','workFromHour','workFromMinute','workFromAmPm','workToHour','workToMinute','workToAmPm'].forEach(id => {
             $(`#AwayMessages_${id}`).on('change input', function() {
                 const val = $(this).val();
@@ -315,29 +371,6 @@ jQuery(() => {
             saveSettings();
             sendSettingsToServer();
         });
-
-        // Character-specific bindings
-        $(document).on('change', '.AwayMessages_charEnabled', function() {
-            const charName = $(this).data('char');
-            settings.characters[charName].enabled = this.checked;
-            saveSettings();
-            sendSettingsToServer();
-        });
-        $(document).on('change input', '.AwayMessages_charRangeMin', function() {
-            settings.characters[$(this).data('char')].timeRangeMin = Number(this.value);
-            saveSettings();
-            sendSettingsToServer();
-        });
-        // ... similar for all character inputs (abbreviated for clarity; full code would include all fields)
-        // Use generic handler:
-        $(document).on('change input', 'input, select, textarea', function(e) {
-            if ($(this).closest('#AwayMessages_characterSettings').length) {
-                // Determine which setting to update based on class and data-char
-                updateCharacterSettingFromElement(this);
-            }
-        });
-
-        // Collapsible drawers
         $(document).on('click', '.inline-drawer-toggle', function() {
             $(this).next('.inline-drawer-content').slideToggle(200);
             $(this).find('.inline-drawer-icon').toggleClass('down');
@@ -349,7 +382,7 @@ jQuery(() => {
         const charName = $el.data('char');
         if (!charName || !settings.characters[charName]) return;
         const cs = settings.characters[charName];
-        const val = $el.is(':checkbox') ? $el.prop('checked') : (Number($el.val()) || $el.val());
+        let val = $el.is(':checkbox') ? $el.prop('checked') : ($el.val() === '' ? '' : ($el.is(':input') ? ($el.attr('type') === 'number' ? Number($el.val()) : $el.val()) : $el.val()));
         if ($el.hasClass('AwayMessages_charEnabled')) cs.enabled = val;
         else if ($el.hasClass('AwayMessages_charRangeMin')) cs.timeRangeMin = Number(val);
         else if ($el.hasClass('AwayMessages_charRangeMinUnit')) cs.timeRangeMinUnit = val;
@@ -394,7 +427,6 @@ jQuery(() => {
         }
     }
 
-    // Idle detection: send a heartbeat to server when user is active
     let lastActivity = Date.now();
     function updateActivity() {
         lastActivity = Date.now();
@@ -406,18 +438,15 @@ jQuery(() => {
         }
     }
 
-    // Attach activity listeners
     ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'].forEach(evt => {
         document.addEventListener(evt, updateActivity, { passive: true });
     });
 
-    // Initialize
+    // Initialization
     loadSettings();
     refreshCharacterList().then(() => {
         renderSettingsUI();
-        // Send initial settings to server
         sendSettingsToServer();
-        // Heartbeat every 10 seconds
         setInterval(updateActivity, 10000);
     });
 });
