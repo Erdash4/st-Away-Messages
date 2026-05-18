@@ -1,0 +1,9 @@
+{
+  "display_name": "Away Messages",
+  "version": "1.0.0",
+  "js": "index.js",
+  "css": "style.css",
+  "author": "",
+  "description": "Sends SillyTavern messages from characters while you are away. Requires the Away Messages server plugin.",
+  "requires": []
+}
