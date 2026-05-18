@@ -371,10 +371,6 @@ jQuery(() => {
             saveSettings();
             sendSettingsToServer();
         });
-        $(document).on('click', '.inline-drawer-toggle', function() {
-            $(this).next('.inline-drawer-content').slideToggle(200);
-            $(this).find('.inline-drawer-icon').toggleClass('down');
-        });
     }
 
     function updateCharacterSettingFromElement(el) {
