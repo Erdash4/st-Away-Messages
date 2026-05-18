@@ -3,8 +3,8 @@
  * Communicates with the Away Messages server plugin at /api/plugins/away-messages/
  */
 
-import { extension_settings, saveSettingsDebounced } from '../../../extensions.js';
-import { characters, getRequestHeaders } from '../../../../script.js';
+import { extension_settings } from '../../../extensions.js';
+import { characters, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
 
 const EXT_NAME = 'away_messages';
 const API_BASE = '/api/plugins/away-messages';
