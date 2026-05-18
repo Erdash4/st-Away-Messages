@@ -269,29 +269,47 @@ jQuery(() => {
         });
     }
 
-    function bindCharacterEvents(characterName) {
-        const container = $(`#AwayMessages_characterSettings .inline-drawer[data-character="${CSS.escape(characterName)}"]`);
-        
-        // Update display values for range inputs
-        container.find('input[type="range"]').on('input', function() {
-            const $span = $(this).next('span');
-            if ($span.length) $span.text(parseFloat($(this).val()).toFixed(2));
-        });
-        
-        // Update weight display values
-        container.find('.AwayMessages_charWeight').on('input', function() {
-            $(this).closest('tr').find('.AwayMessages_weightValue').text(parseFloat($(this).val()).toFixed(2));
-        });
+function bindCharacterEvents(characterName) {
+    const container = $(`#AwayMessages_characterSettings .inline-drawer[data-character="${CSS.escape(characterName)}"]`);
+    
+    // Update display values for range inputs
+    container.find('input[type="range"]').on('input', function() {
+        const $span = $(this).next('span');
+        if ($span.length) $span.text(parseFloat($(this).val()).toFixed(2));
+    });
+    
+    // Update weight display values
+    container.find('.AwayMessages_charWeight').on('input', function() {
+        $(this).closest('tr').find('.AwayMessages_weightValue').text(parseFloat($(this).val()).toFixed(2));
+    });
 
-        container.find('input, select, textarea').on('change input', function(e) {
-            updateCharacterSettingFromElement(this);
-        });
+    container.find('input, select, textarea').on('change input', function(e) {
+        updateCharacterSettingFromElement(this);
+    });
+    
+    // FIXED: Proper drawer toggle with preventDefault and stopPropagation
+    const $toggle = container.find('.inline-drawer-toggle');
+    const $content = container.find('.inline-drawer-content');
+    const $icon = container.find('.inline-drawer-icon');
+    
+    // Remove any existing handlers first to prevent duplicate bindings
+    $toggle.off('click.AwayMessages');
+    
+    $toggle.on('click.AwayMessages', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
         
-        container.find('.inline-drawer-toggle').off('click').on('click', function() {
-            $(this).next('.inline-drawer-content').slideToggle(200);
-            $(this).find('.inline-drawer-icon').toggleClass('down');
-        });
-    }
+        // Toggle the content visibility with animation
+        if ($content.is(':visible')) {
+            $content.slideUp(200);
+            $icon.removeClass('down');
+        } else {
+            $content.slideDown(200);
+            $icon.addClass('down');
+        }
+        return false;
+    });
+}
 
     function renderSettingsUI() {
         if (uiRendered) return;
